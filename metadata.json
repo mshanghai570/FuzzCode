@@ -1,0 +1,6 @@
+{
+  "name": "FUZZCODE — Native iOS AI Coding Agent Control Center",
+  "description": "Mobile command center for AI coding agents and custom OpenAI-compatible endpoints with real-time streaming, OpenCode remote host pairing, and diff review.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

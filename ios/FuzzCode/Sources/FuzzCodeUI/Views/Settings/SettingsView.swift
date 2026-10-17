@@ -40,6 +40,16 @@ public struct SettingsView: View {
                         }
                     }
                     .listRowBackground(FuzzTheme.surface)
+
+                    Section("Integrations") {
+                        NavigationLink {
+                            IntegrationsView()
+                        } label: {
+                            Label("MCP & GitHub", systemImage: "network")
+                                .foregroundStyle(FuzzTheme.textPrimary)
+                        }
+                    }
+                    .listRowBackground(FuzzTheme.surface)
                     
                     Section("Diagnostics & Network") {
                         Button(action: runDiagnostics) {

@@ -12,6 +12,7 @@ public struct GitHubConnectorView: View {
     @State private var pulls: [GitHubPullRequest] = []
     @State private var selectedTab = 0
     @State private var errorMessage: String?
+    @State private var isImportingRepository = false
     
     public init(config: Binding<GitHubConfig>) {
         self._config = config
@@ -20,7 +21,7 @@ public struct GitHubConnectorView: View {
     public var body: some View {
         NavigationStack {
             ZStack {
-                FuzzTheme.charcoalBlack.ignoresSafeArea()
+                FuzzTheme.background.ignoresSafeArea()
                 
                 VStack(spacing: 0) {
                     if config.isConnected, let user = config.user {
@@ -40,23 +41,23 @@ public struct GitHubConnectorView: View {
                                     Text("@\(user.login)")
                                         .font(.caption)
                                         .fontDesign(.monospaced)
-                                        .foregroundStyle(FuzzTheme.mutedSlate)
+                                        .foregroundStyle(FuzzTheme.textSecondary)
                                 }
                                 
                                 Spacer()
                                 
                                 Button("Disconnect") {
-                                    FuzzTheme.hapticAlert()
+                                    FuzzTheme.playErrorFeedback()
                                     config.isConnected = false
                                     config.user = nil
                                     repos.removeAll()
                                 }
                                 .font(.caption)
                                 .fontWeight(.medium)
-                                .foregroundStyle(FuzzTheme.saturatedRed)
+                                .foregroundStyle(FuzzTheme.clippingRed)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(FuzzTheme.saturatedRed.opacity(0.15))
+                                .background(FuzzTheme.clippingRed.opacity(0.15))
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
                             
@@ -69,14 +70,14 @@ public struct GitHubConnectorView: View {
                             }
                             .font(.caption2)
                             .fontDesign(.monospaced)
-                            .foregroundStyle(FuzzTheme.mutedSlate)
+                            .foregroundStyle(FuzzTheme.textSecondary)
                         }
                         .padding()
-                        .background(FuzzTheme.darkPedalBase)
+                        .background(FuzzTheme.surface)
                         .overlay(
                             Rectangle()
                                 .frame(height: 1)
-                                .foregroundStyle(FuzzTheme.subtleBorder),
+                                .foregroundStyle(FuzzTheme.border),
                             alignment: .bottom
                         )
                         
@@ -103,18 +104,24 @@ public struct GitHubConnectorView: View {
                                             if repo.isPrivate {
                                                 Image(systemName: "lock.fill")
                                                     .font(.caption2)
-                                                    .foregroundStyle(FuzzTheme.mutedSlate)
+                                                    .foregroundStyle(FuzzTheme.textSecondary)
                                             }
                                         }
                                         if let desc = repo.repoDescription {
                                             Text(desc)
                                                 .font(.caption)
-                                                .foregroundStyle(FuzzTheme.mutedSlate)
+                                                .foregroundStyle(FuzzTheme.textSecondary)
                                                 .lineLimit(2)
                                         }
                                     }
                                     .padding(.vertical, 4)
-                                    .listRowBackground(FuzzTheme.darkPedalBase)
+                                    .listRowBackground(FuzzTheme.surface)
+                                    .swipeActions(edge: .trailing) {
+                                        Button("Import") { importRepository(repo) }
+                                            .tint(FuzzTheme.acidGreen)
+                                            .disabled(isImportingRepository)
+                                    }
+                                    .accessibilityHint("Swipe left to import this repository into a local sandboxed workspace")
                                 }
                             } else {
                                 ForEach(pulls) { pr in
@@ -137,7 +144,7 @@ public struct GitHubConnectorView: View {
                                             .foregroundStyle(FuzzTheme.electricPurple)
                                     }
                                     .padding(.vertical, 4)
-                                    .listRowBackground(FuzzTheme.darkPedalBase)
+                                    .listRowBackground(FuzzTheme.surface)
                                 }
                             }
                         }
@@ -160,7 +167,7 @@ public struct GitHubConnectorView: View {
                                         .foregroundStyle(.white)
                                     Text("Grants full repo access, branch switching, and PR management to your FuzzCode coding agents.")
                                         .font(.footnote)
-                                        .foregroundStyle(FuzzTheme.mutedSlate)
+                                        .foregroundStyle(FuzzTheme.textSecondary)
                                         .multilineTextAlignment(.center)
                                         .padding(.horizontal)
                                 }
@@ -170,15 +177,15 @@ public struct GitHubConnectorView: View {
                                         .font(.caption2)
                                         .fontDesign(.monospaced)
                                         .fontWeight(.bold)
-                                        .foregroundStyle(FuzzTheme.mutedSlate)
+                                        .foregroundStyle(FuzzTheme.textSecondary)
                                     
                                     SecureField("ghp_xxxxxxxxxxxxxxxxxxxx", text: $tokenInput)
                                         .padding(12)
-                                        .background(FuzzTheme.darkPedalBase)
+                                        .background(FuzzTheme.surface)
                                         .clipShape(RoundedRectangle(cornerRadius: 10))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 10)
-                                                .stroke(FuzzTheme.subtleBorder, lineWidth: 1)
+                                                .stroke(FuzzTheme.border, lineWidth: 1)
                                         )
                                         .foregroundStyle(.white)
                                         .fontDesign(.monospaced)
@@ -221,8 +228,37 @@ public struct GitHubConnectorView: View {
         }
     }
     
+    private func importRepository(_ repo: GitHubRepo) {
+        guard let token = KeychainService.shared.get(key: config.keychainTokenKey) else {
+            errorMessage = "The GitHub token is missing from Keychain. Reconnect GitHub before importing."
+            return
+        }
+        guard let separator = repo.fullName.firstIndex(of: "/") else { return }
+        isImportingRepository = true
+        Task {
+            do {
+                let workspaceID = "github-\(repo.id)"
+                let workspace = try WorkspaceManager(root: WorkspaceManager.defaultRoot(workspaceId: workspaceID))
+                let client = GitHubClient(token: token)
+                _ = try await client.importRepository(owner: String(repo.fullName[..<separator]),
+                                                      repo: String(repo.fullName[repo.fullName.index(after: separator)...]),
+                                                      branch: repo.defaultBranch, into: workspace)
+                await MainActor.run {
+                    config.selectedRepo = repo
+                    errorMessage = "Imported \(repo.fullName) into a sandboxed workspace."
+                    isImportingRepository = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Repository import failed: \(error.localizedDescription)"
+                    isImportingRepository = false
+                }
+            }
+        }
+    }
+
     private func authenticateGitHub() {
-        FuzzTheme.hapticClick()
+        FuzzTheme.playStompFeedback()
         isAuthenticating = true
         errorMessage = nil
         
@@ -232,19 +268,28 @@ public struct GitHubConnectorView: View {
                 let (user, scopes) = try await client.authenticate()
                 let fetchedRepos = try await client.fetchRepositories()
                 await MainActor.run {
-                    config.isConnected = true
-                    config.user = user
-                    config.scopes = scopes
-                    config.connectedAt = Date()
-                    self.repos = fetchedRepos
-                    self.isAuthenticating = false
-                    FuzzTheme.hapticSuccess()
+                    let credentialKey = config.keychainTokenKey
+                    switch KeychainService.shared.save(key: credentialKey, secret: tokenInput) {
+                    case .success:
+                        config.isConnected = true
+                        config.user = user
+                        config.scopes = scopes
+                        config.connectedAt = Date()
+                        self.repos = fetchedRepos
+                        self.tokenInput = ""
+                        self.isAuthenticating = false
+                        FuzzTheme.playSuccessFeedback()
+                    case .failure(let error):
+                        self.errorMessage = "GitHub authenticated, but the token could not be saved securely: \(error.localizedDescription)"
+                        self.isAuthenticating = false
+                        FuzzTheme.playErrorFeedback()
+                    }
                 }
             } catch {
                 await MainActor.run {
                     self.errorMessage = error.localizedDescription
                     self.isAuthenticating = false
-                    FuzzTheme.hapticAlert()
+                    FuzzTheme.playErrorFeedback()
                 }
             }
         }

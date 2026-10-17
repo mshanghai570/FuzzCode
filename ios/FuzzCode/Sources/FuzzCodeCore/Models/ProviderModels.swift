@@ -25,6 +25,8 @@ public struct ProviderConfig: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
     public var displayName: String
     public var baseURLString: String
+    // Defaulted so providers.json files saved by older builds still decode.
+    public var providerKind: ProviderKind? = nil
     public var selectedModel: String
     public var authMethod: ProviderAuthMethod
     public var chatgptSession: ChatGPTSession?
@@ -40,10 +42,13 @@ public struct ProviderConfig: Identifiable, Codable, Equatable, Sendable {
     public var lastTestedAt: Date?
     public var lastLatencyMs: Double?
     
+    public var resolvedKind: ProviderKind { providerKind ?? .custom }
+
     public init(
         id: UUID = UUID(),
         displayName: String,
         baseURLString: String,
+        providerKind: ProviderKind? = nil,
         selectedModel: String = "gpt-4o",
         authMethod: ProviderAuthMethod = .apiKey,
         chatgptSession: ChatGPTSession? = nil,
@@ -62,6 +67,7 @@ public struct ProviderConfig: Identifiable, Codable, Equatable, Sendable {
         self.id = id
         self.displayName = displayName
         self.baseURLString = baseURLString
+        self.providerKind = providerKind
         self.selectedModel = selectedModel
         self.authMethod = authMethod
         self.chatgptSession = chatgptSession
@@ -147,13 +153,19 @@ public struct ChatConversation: Identifiable, Codable, Equatable, Sendable {
     public var modelId: String
     public var messages: [ChatMessage]
     public var updatedAt: Date
+    // Optional fields preserve decoding of conversations saved by earlier versions.
+    public var systemPrompt: String?
+    public var ragSources: [RAGSource]?
+    public var ragConfig: RAGConfig?
+    public var selectedSkillIDs: [UUID]?
     
-    public init(id: UUID = UUID(), title: String, providerId: UUID, modelId: String, messages: [ChatMessage] = [], updatedAt: Date = Date()) {
+    public init(id: UUID = UUID(), title: String, providerId: UUID, modelId: String, messages: [ChatMessage] = [], updatedAt: Date = Date(), selectedSkillIDs: [UUID]? = nil) {
         self.id = id
         self.title = title
         self.providerId = providerId
         self.modelId = modelId
         self.messages = messages
         self.updatedAt = updatedAt
+        self.selectedSkillIDs = selectedSkillIDs
     }
 }

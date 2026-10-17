@@ -19,14 +19,14 @@ public protocol ModelProviderProtocol: Identifiable, Sendable {
         messages: [ChatMessage],
         temperature: Double?,
         systemPrompt: String?
-    ) -> AsyncThrowingStream<String, Error>
+    ) async -> AsyncThrowingStream<String, Error>
 }
 
 /// Core Protocol defining an external Coding Agent runtime (e.g. OpenCode, Aider, Claude Code).
 public protocol CodingAgentProtocol: Identifiable, Sendable {
     var id: UUID { get }
     var name: String { get }
-    var supportedCapabilities: Set<AgentCapability> { get }
+    var supportedCapabilities: Set<AgentCapability> { get async }
     
     /// Connects to the agent host and performs handshake / capability detection.
     func connect() async throws -> AgentHostMetadata
@@ -41,7 +41,7 @@ public protocol CodingAgentProtocol: Identifiable, Sendable {
     func sendInstruction(
         sessionId: String,
         prompt: String
-    ) -> AsyncThrowingStream<AgentEvent, Error>
+    ) async -> AsyncThrowingStream<AgentEvent, Error>
     
     /// Requests cancellation of the currently active session task.
     func cancelTask(sessionId: String) async throws

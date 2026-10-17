@@ -3,7 +3,7 @@ import XCTest
 
 final class OpenCodeCapabilityTests: XCTestCase {
     
-    func testCapabilitySetContainsAllCoreFeatures() {
+    func testCapabilitySetContainsAllCoreFeatures() async {
         let host = OpenCodeHostConfig(
             displayName: "Test Host",
             hostURLString: "https://agent.local:4096",
@@ -11,9 +11,10 @@ final class OpenCodeCapabilityTests: XCTestCase {
         )
         
         let client = OpenCodeClient(hostConfig: host)
-        XCTAssertTrue(host.capabilities.contains(.streaming))
-        XCTAssertTrue(host.capabilities.contains(.permissionRequests))
-        XCTAssertTrue(host.capabilities.contains(.fileDiffs))
+        let capabilities = await client.supportedCapabilities
+        XCTAssertTrue(capabilities.contains(.streaming))
+        XCTAssertTrue(capabilities.contains(.permissionRequests))
+        XCTAssertTrue(capabilities.contains(.fileDiffs))
     }
     
     func testPermissionRequestRiskLevelDefaults() {

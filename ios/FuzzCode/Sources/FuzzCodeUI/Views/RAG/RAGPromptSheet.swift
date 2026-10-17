@@ -6,6 +6,8 @@ public struct RAGPromptSheet: View {
     @Binding public var promptText: String
     @Binding public var sources: [RAGSource]
     @Binding public var config: RAGConfig
+    @Binding public var selectedSkillIDs: [UUID]
+    public let availableSkills: [AgentSkill]
     public let scopeTitle: String
     @Environment(\.dismiss) var dismiss
     
@@ -16,24 +18,34 @@ public struct RAGPromptSheet: View {
     @State private var testQuery = ""
     @State private var testCitations: [RetrievedCitation] = []
     
-    public init(promptText: Binding<String>, sources: Binding<[RAGSource]>, config: Binding<RAGConfig>, scopeTitle: String) {
+    public init(
+        promptText: Binding<String>,
+        sources: Binding<[RAGSource]>,
+        config: Binding<RAGConfig>,
+        availableSkills: [AgentSkill],
+        selectedSkillIDs: Binding<[UUID]>,
+        scopeTitle: String
+    ) {
         self._promptText = promptText
         self._sources = sources
         self._config = config
+        self.availableSkills = availableSkills
+        self._selectedSkillIDs = selectedSkillIDs
         self.scopeTitle = scopeTitle
     }
     
     public var body: some View {
         NavigationStack {
             ZStack {
-                FuzzTheme.charcoalBlack.ignoresSafeArea()
+                FuzzTheme.background.ignoresSafeArea()
                 
                 VStack(spacing: 0) {
                     Picker("Section", selection: $selectedTab) {
                         Text("Prompt").tag(0)
-                        Text("RAG Sources (\(sources.filter { $0.isEnabled }.count))").tag(1)
-                        Text("Test Search").tag(2)
-                        Text("Tuning").tag(3)
+                        Text("Skills (\(selectedSkillIDs.count))").tag(1)
+                        Text("RAG Sources (\(sources.filter { $0.isEnabled }.count))").tag(2)
+                        Text("Test Search").tag(3)
+                        Text("Tuning").tag(4)
                     }
                     .pickerStyle(.segmented)
                     .padding()
@@ -46,12 +58,13 @@ public struct RAGPromptSheet: View {
                                     .font(.caption2)
                                     .fontDesign(.monospaced)
                                     .fontWeight(.bold)
-                                    .foregroundStyle(FuzzTheme.mutedSlate)
+                                    .foregroundStyle(FuzzTheme.textSecondary)
                                 
                                 TextEditor(text: $promptText)
+                                    .accessibilityLabel("System prompt") // [VERIFY] confirm label matches intent
                                     .frame(minHeight: 180)
                                     .padding(8)
-                                    .background(FuzzTheme.darkPedalBase)
+                                    .background(FuzzTheme.surface)
                                     .clipShape(RoundedRectangle(cornerRadius: 10))
                                     .foregroundStyle(.white)
                                     .fontDesign(.monospaced)
@@ -61,19 +74,19 @@ public struct RAGPromptSheet: View {
                                     .font(.caption2)
                                     .fontDesign(.monospaced)
                                     .fontWeight(.bold)
-                                    .foregroundStyle(FuzzTheme.mutedSlate)
+                                    .foregroundStyle(FuzzTheme.textSecondary)
                                     .padding(.top, 8)
                                 
                                 Button("Swift 6 Concurrency Specialist") {
                                     promptText = "You are an expert native iOS engineer specializing in Swift 6, SwiftUI, and Sendable concurrency."
-                                    FuzzTheme.hapticClick()
+                                    FuzzTheme.playStompFeedback()
                                 }
                                 .buttonStyle(.bordered)
                                 .tint(FuzzTheme.acidGreen)
                                 
                                 Button("Autonomous OpenCode Agent") {
                                     promptText = "You are an autonomous OpenCode software engineer. Plan steps, invoke tools, and test changes before reporting."
-                                    FuzzTheme.hapticClick()
+                                    FuzzTheme.playStompFeedback()
                                 }
                                 .buttonStyle(.bordered)
                                 .tint(FuzzTheme.electricPurple)
@@ -81,6 +94,46 @@ public struct RAGPromptSheet: View {
                             .padding(.horizontal)
                         }
                     } else if selectedTab == 1 {
+                        List {
+                            if availableSkills.isEmpty {
+                                VStack(spacing: 10) {
+                                    Image(systemName: "sparkles")
+                                        .font(.title2)
+                                        .foregroundStyle(FuzzTheme.electricPurple)
+                                    Text("No skills available")
+                                        .font(.headline)
+                                        .foregroundStyle(.white)
+                                    Text("Create skills in Settings → Integrations → Skills, then select them for this conversation.")
+                                        .font(.caption)
+                                        .foregroundStyle(FuzzTheme.textSecondary)
+                                        .multilineTextAlignment(.center)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 28)
+                                .listRowBackground(FuzzTheme.surface)
+                            } else {
+                                Section("Available Skills") {
+                                    ForEach(availableSkills) { skill in
+                                        Toggle(isOn: skillSelectionBinding(for: skill)) {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(skill.name)
+                                                    .font(.subheadline.weight(.semibold))
+                                                    .foregroundStyle(.white)
+                                                Text(skill.content)
+                                                    .font(.caption)
+                                                    .foregroundStyle(FuzzTheme.textSecondary)
+                                                    .lineLimit(3)
+                                            }
+                                        }
+                                        .tint(FuzzTheme.acidGreen)
+                                        .listRowBackground(FuzzTheme.surface)
+                                    }
+                                }
+                            }
+                        }
+                        .listStyle(.insetGrouped)
+                        .scrollContentBackground(.hidden)
+                    } else if selectedTab == 2 {
                         // RAG Knowledge Sources List
                         List {
                             Section {
@@ -103,11 +156,11 @@ public struct RAGPromptSheet: View {
                                         }
                                         Text(source.content)
                                             .font(.caption)
-                                            .foregroundStyle(FuzzTheme.mutedSlate)
+                                            .foregroundStyle(FuzzTheme.textSecondary)
                                             .lineLimit(2)
                                     }
                                     .padding(.vertical, 4)
-                                    .listRowBackground(FuzzTheme.darkPedalBase)
+                                    .listRowBackground(FuzzTheme.surface)
                                 }
                                 .onDelete { indexSet in
                                     sources.remove(atOffsets: indexSet)
@@ -125,13 +178,13 @@ public struct RAGPromptSheet: View {
                         }
                         .listStyle(.insetGrouped)
                         .scrollContentBackground(.hidden)
-                    } else if selectedTab == 2 {
+                    } else if selectedTab == 3 {
                         // Test Search View
                         VStack(spacing: 12) {
                             HStack {
                                 TextField("Enter test query...", text: $testQuery)
                                     .padding(10)
-                                    .background(FuzzTheme.darkPedalBase)
+                                    .background(FuzzTheme.surface)
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
                                     .foregroundStyle(.white)
                                 
@@ -159,9 +212,9 @@ public struct RAGPromptSheet: View {
                                     Text(citation.snippet)
                                         .font(.caption2)
                                         .fontDesign(.monospaced)
-                                        .foregroundStyle(FuzzTheme.mutedSlate)
+                                        .foregroundStyle(FuzzTheme.textSecondary)
                                 }
-                                .listRowBackground(FuzzTheme.darkPedalBase)
+                                .listRowBackground(FuzzTheme.surface)
                             }
                             .listStyle(.plain)
                         }
@@ -174,7 +227,7 @@ public struct RAGPromptSheet: View {
                                 Stepper("Top-K Chunks: \(config.topK)", value: $config.topK, in: 1...8)
                                 Stepper("Similarity Cutoff: \(Int(config.similarityThreshold * 100))%", value: $config.similarityThreshold, in: 0.0...0.8, step: 0.05)
                             }
-                            .listRowBackground(FuzzTheme.darkPedalBase)
+                            .listRowBackground(FuzzTheme.surface)
                         }
                         .scrollContentBackground(.hidden)
                     }
@@ -191,16 +244,17 @@ public struct RAGPromptSheet: View {
             .sheet(isPresented: $isAddingSource) {
                 NavigationStack {
                     ZStack {
-                        FuzzTheme.charcoalBlack.ignoresSafeArea()
+                        FuzzTheme.background.ignoresSafeArea()
                         Form {
                             Section("Source Info") {
                                 TextField("Source Title", text: $newTitle)
                                     .foregroundStyle(.white)
                                 TextEditor(text: $newContent)
+                                    .accessibilityLabel("Source content") // [VERIFY] confirm label matches intent
                                     .frame(minHeight: 120)
                                     .foregroundStyle(.white)
                             }
-                            .listRowBackground(FuzzTheme.darkPedalBase)
+                            .listRowBackground(FuzzTheme.surface)
                         }
                         .scrollContentBackground(.hidden)
                     }
@@ -223,6 +277,7 @@ public struct RAGPromptSheet: View {
                                 newContent = ""
                             }
                             .foregroundStyle(FuzzTheme.acidGreen)
+                            .disabled(newContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                     }
                 }
@@ -231,12 +286,27 @@ public struct RAGPromptSheet: View {
     }
     
     private func runTestSearch() {
-        FuzzTheme.hapticClick()
+        FuzzTheme.playStompFeedback()
         Task {
             let res = await RAGService.shared.retrieve(query: testQuery, sources: sources, config: config)
             await MainActor.run {
                 self.testCitations = res.citations
             }
         }
+    }
+
+    private func skillSelectionBinding(for skill: AgentSkill) -> Binding<Bool> {
+        Binding(
+            get: { selectedSkillIDs.contains(skill.id) },
+            set: { isSelected in
+                if isSelected {
+                    if !selectedSkillIDs.contains(skill.id) {
+                        selectedSkillIDs.append(skill.id)
+                    }
+                } else {
+                    selectedSkillIDs.removeAll { $0 == skill.id }
+                }
+            }
+        )
     }
 }

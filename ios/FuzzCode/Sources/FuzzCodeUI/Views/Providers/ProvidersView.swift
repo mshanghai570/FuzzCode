@@ -75,6 +75,9 @@ public struct ProvidersView: View {
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(FuzzTheme.textMuted)
                                 .lineLimit(1)
+                            Text(provider.resolvedKind.displayName.uppercased())
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundColor(FuzzTheme.electricPurple)
                         }
                         
                         Spacer()
@@ -182,8 +185,8 @@ public struct ProvidersView: View {
         testResult[provider.id] = nil
         Task {
             do {
-                let client = try OpenAIClient(config: provider)
-                let latency = try await client.testConnection()
+                let adapter = try makeAIProvider(config: provider)
+                let latency = try await adapter.testConnection()
                 await MainActor.run {
                     self.testResult[provider.id] = "\(Int(latency))ms"
                     self.testingProviderId = nil
@@ -223,6 +226,7 @@ struct EndpointConfigSheet: View {
     @Environment(\.dismiss) var dismiss
     
     @State private var displayName: String = ""
+    @State private var providerKind: ProviderKind = .custom
     @State private var baseURL: String = "https://api.openai.com/v1"
     @State private var apiKey: String = ""
     @State private var selectedModel: String = "gpt-4o"
@@ -238,7 +242,8 @@ struct EndpointConfigSheet: View {
         self.provider = provider
         self.onSave = onSave
         _displayName = State(initialValue: provider?.displayName ?? "OpenAI Compatible")
-        _baseURL = State(initialValue: provider?.baseURLString ?? "https://api.openai.com/v1")
+        _providerKind = State(initialValue: provider?.resolvedKind ?? .custom)
+        _baseURL = State(initialValue: provider?.baseURLString ?? (provider?.resolvedKind ?? .custom).defaultBaseURLString)
         _selectedModel = State(initialValue: provider?.selectedModel ?? "gpt-4o")
         _orgId = State(initialValue: provider?.organizationId ?? "")
         _customPath = State(initialValue: provider?.customApiPath ?? "")
@@ -252,6 +257,21 @@ struct EndpointConfigSheet: View {
                 FuzzTheme.background.ignoresSafeArea()
                 
                 Form {
+                    Section("Provider") {
+                        Picker("Provider", selection: $providerKind) {
+                            ForEach(ProviderKind.allCases, id: \.self) { kind in
+                                Text(kind.displayName).tag(kind)
+                            }
+                        }
+                        .onChange(of: providerKind) { _, newKind in
+                            displayName = newKind.displayName
+                            baseURL = newKind.defaultBaseURLString
+                            selectedModel = newKind.defaultModel
+                            discoveredModels = []
+                        }
+                    }
+                    .listRowBackground(FuzzTheme.surface)
+
                     Section("Endpoint Target") {
                         TextField("Provider Display Name", text: $displayName)
                         TextField("Base URL (e.g. https://api.openai.com/v1)", text: $baseURL)
@@ -262,19 +282,24 @@ struct EndpointConfigSheet: View {
                     Section("Model Specification") {
                         HStack {
                             TextField("Model ID (e.g. gpt-4o, claude-3-5, llama3)", text: $selectedModel)
-                            Button("Discover") {
+                            Button(isDiscovering ? "…" : "Discover") {
                                 discoverModels()
                             }
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
                             .foregroundColor(FuzzTheme.acidGreen)
+                            .disabled(isDiscovering)
                         }
-                        
-                        if !discoveredModels.isEmpty {
-                            Picker("Discovered Models", selection: $selectedModel) {
-                                ForEach(discoveredModels) { model in
+
+                        if !modelChoices.isEmpty {
+                            Picker("Available Models", selection: $selectedModel) {
+                                ForEach(modelChoices) { model in
                                     Text(model.id).tag(model.id)
                                 }
                             }
+                        } else if testStatusText != nil {
+                            Text(testStatusText ?? "")
+                                .font(.caption)
+                                .foregroundColor(FuzzTheme.textSecondary)
                         }
                     }
                     .listRowBackground(FuzzTheme.surface)
@@ -313,11 +338,26 @@ struct EndpointConfigSheet: View {
         }
     }
     
+    private var modelChoices: [ModelInfo] {
+        var seen = Set<String>()
+        var choices = providerKind.curatedModels.map { ModelInfo(id: $0) }
+        choices.forEach { seen.insert($0.id) }
+        for model in discoveredModels where seen.insert(model.id).inserted {
+            choices.append(model)
+        }
+        if !selectedModel.isEmpty, seen.insert(selectedModel).inserted {
+            choices.insert(ModelInfo(id: selectedModel), at: 0)
+        }
+        return choices
+    }
+
     private func discoverModels() {
         isDiscovering = true
+        testStatusText = nil
         let tempConfig = ProviderConfig(
             displayName: displayName,
             baseURLString: baseURL,
+            providerKind: providerKind,
             selectedModel: selectedModel,
             timeoutSeconds: timeoutSeconds,
             allowsInsecureHTTP: allowsInsecureHTTP
@@ -327,15 +367,17 @@ struct EndpointConfigSheet: View {
         }
         Task {
             do {
-                let client = try OpenAIClient(config: tempConfig)
-                let models = try await client.discoverModels()
+                let adapter = try makeAIProvider(config: tempConfig)
+                let models = try await adapter.discoverModels()
                 await MainActor.run {
                     self.discoveredModels = models
+                    self.testStatusText = models.isEmpty ? "No models returned." : "\(models.count) models found."
                     self.isDiscovering = false
                     FuzzTheme.playSuccessFeedback()
                 }
             } catch {
                 await MainActor.run {
+                    self.testStatusText = error.localizedDescription
                     self.isDiscovering = false
                     FuzzTheme.playErrorFeedback()
                 }
@@ -352,6 +394,7 @@ struct EndpointConfigSheet: View {
             id: configId,
             displayName: displayName,
             baseURLString: baseURL,
+            providerKind: providerKind,
             selectedModel: selectedModel,
             organizationId: orgId.isEmpty ? nil : orgId,
             customApiPath: customPath.isEmpty ? nil : customPath,

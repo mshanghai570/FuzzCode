@@ -71,8 +71,9 @@ public struct GitHubPullRequest: Identifiable, Codable, Equatable, Sendable {
     public let createdAt: Date
     public let additions: Int
     public let deletions: Int
+    public let htmlURL: String?
     
-    public init(id: Int, number: Int, title: String, state: String, user: String, headBranch: String, baseBranch: String, createdAt: Date, additions: Int, deletions: Int) {
+    public init(id: Int, number: Int, title: String, state: String, user: String, headBranch: String, baseBranch: String, createdAt: Date, additions: Int, deletions: Int, htmlURL: String? = nil) {
         self.id = id
         self.number = number
         self.title = title
@@ -83,6 +84,7 @@ public struct GitHubPullRequest: Identifiable, Codable, Equatable, Sendable {
         self.createdAt = createdAt
         self.additions = additions
         self.deletions = deletions
+        self.htmlURL = htmlURL
     }
 }
 
@@ -103,4 +105,65 @@ public struct GitHubConfig: Codable, Equatable, Sendable {
         self.scopes = scopes
         self.connectedAt = connectedAt
     }
+}
+
+public struct GitHubTreeFile: Codable, Equatable, Sendable {
+    public let path: String
+    public let sha: String
+    public let size: Int?
+
+    public init(path: String, sha: String, size: Int? = nil) {
+        self.path = path
+        self.sha = sha
+        self.size = size
+    }
+}
+
+public struct GitHubRepositoryTree: Codable, Equatable, Sendable {
+    public let commitSHA: String
+    public let files: [GitHubTreeFile]
+
+    public init(commitSHA: String, files: [GitHubTreeFile]) {
+        self.commitSHA = commitSHA
+        self.files = files
+    }
+}
+
+public struct GitHubFileChange: Equatable, Sendable {
+    public let path: String
+    public let content: String
+
+    public init(path: String, content: String) {
+        self.path = path
+        self.content = content
+    }
+}
+
+public struct GitHubPublishResult: Equatable, Sendable {
+    public let branchName: String
+    public let commitSHA: String
+    public let pullRequest: GitHubPullRequest
+
+    public init(branchName: String, commitSHA: String, pullRequest: GitHubPullRequest) {
+        self.branchName = branchName
+        self.commitSHA = commitSHA
+        self.pullRequest = pullRequest
+    }
+}
+
+public enum GitHubClientError: Error, Equatable {
+    case invalidPath
+    case repositoryTreeTruncated
+    case unsupportedContent(String)
+    case invalidResponse
+    case httpStatus(Int)
+    case noChanges
+    case reviewRequired
+    case tooLarge
+}
+
+public struct GitHubSearchMatch: Equatable, Sendable {
+    public let path: String
+    public let lineNumber: Int
+    public let text: String
 }

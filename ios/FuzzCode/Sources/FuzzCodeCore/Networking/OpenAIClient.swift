@@ -10,10 +10,17 @@ public actor OpenAIClient: ModelProviderProtocol {
     public let isEnabled: Bool
     
     private let config: ProviderConfig
-    private let keychain: KeychainService
     private let session: URLSession
+    private let credentialLookup: @Sendable (String) -> String?
+    private let requestPerformer: @Sendable (URLRequest) async throws -> (Data, URLResponse)
     
-    public init(config: ProviderConfig, keychain: KeychainService = .shared) throws {
+    public init(
+        config: ProviderConfig,
+        keychain: KeychainService = .shared,
+        session injectedSession: URLSession? = nil,
+        credentialLookup: (@Sendable (String) -> String?)? = nil,
+        requestPerformer: (@Sendable (URLRequest) async throws -> (Data, URLResponse))? = nil
+    ) throws {
         guard let resolvedURL = config.resolvedBaseURL else {
             throw OpenAIClientError.invalidBaseURL(config.baseURLString)
         }
@@ -23,12 +30,20 @@ public actor OpenAIClient: ModelProviderProtocol {
         self.selectedModel = config.selectedModel
         self.isEnabled = config.isEnabled
         self.config = config
-        self.keychain = keychain
-        
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = config.timeoutSeconds
-        configuration.timeoutIntervalForResource = config.timeoutSeconds * 2
-        self.session = URLSession(configuration: configuration)
+        let session: URLSession
+        if let injectedSession {
+            session = injectedSession
+        } else {
+            let configuration = URLSessionConfiguration.default
+            configuration.timeoutIntervalForRequest = config.timeoutSeconds
+            configuration.timeoutIntervalForResource = config.timeoutSeconds * 2
+            session = URLSession(configuration: configuration)
+        }
+        self.session = session
+        self.credentialLookup = credentialLookup ?? { keychain.get(key: $0) }
+        self.requestPerformer = requestPerformer ?? { request in
+            try await session.data(for: request)
+        }
     }
     
     // MARK: - Normalization Helpers
@@ -161,7 +176,7 @@ public actor OpenAIClient: ModelProviderProtocol {
         systemPrompt: String? = nil
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let producer = Task {
                 do {
                     let completionsURL = Self.constructChatCompletionsURL(baseURL: self.baseURL, customApiPath: self.config.customApiPath)
                     var request = URLRequest(url: completionsURL)
@@ -225,15 +240,119 @@ public actor OpenAIClient: ModelProviderProtocol {
                             continuation.yield(deltaText)
                         }
                     }
-                    
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { @Sendable _ in producer.cancel() }
         }
     }
-    
+
+    public func completeWithTools(
+        messages: [ChatMessage],
+        systemPrompt: String?,
+        tools: [ProviderToolDefinition],
+        toolResults: [ProviderToolExchange] = []
+    ) async throws -> ProviderTurnResult {
+        let completionsURL = Self.constructChatCompletionsURL(
+            baseURL: baseURL,
+            customApiPath: config.customApiPath
+        )
+        var request = URLRequest(url: completionsURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        applyHeaders(to: &request)
+
+        var messagePayload: [[String: Any]] = []
+        if let systemPrompt, !systemPrompt.isEmpty {
+            messagePayload.append(["role": "system", "content": systemPrompt])
+        }
+        messagePayload.append(contentsOf: messages.map {
+            ["role": $0.role.rawValue, "content": $0.content]
+        })
+        for exchange in toolResults {
+            let assistantCalls: [[String: Any]] = exchange.calls.map { call in
+                [
+                    "id": call.id,
+                    "type": "function",
+                    "function": [
+                        "name": call.name,
+                        "arguments": String(decoding: call.arguments, as: UTF8.self)
+                    ]
+                ]
+            }
+            messagePayload.append([
+                "role": "assistant",
+                "content": NSNull(),
+                "tool_calls": assistantCalls
+            ])
+            messagePayload.append(contentsOf: exchange.results.map {
+                ["role": "tool", "tool_call_id": $0.toolCallID, "content": $0.content]
+            })
+        }
+
+        let toolPayload = try tools.map { tool -> [String: Any] in
+            let schemaData = try JSONEncoder().encode(tool.inputSchema)
+            guard let schema = try JSONSerialization.jsonObject(with: schemaData) as? [String: Any] else {
+                throw OpenAIClientError.invalidResponseFormat("A tool input schema was not a JSON object.")
+            }
+            return [
+                "type": "function",
+                "function": [
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": schema
+                ]
+            ]
+        }
+        let payload: [String: Any] = [
+            "model": selectedModel,
+            "messages": messagePayload,
+            "tools": toolPayload,
+            "tool_choice": "auto",
+            "stream": false
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await requestPerformer(request)
+        } catch let error as OpenAIClientError {
+            throw error
+        } catch {
+            // Never surface transport text - it can echo credentials.
+            throw OpenAIClientError.networkError("The network request failed.")
+        }
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OpenAIClientError.invalidResponseFormat("Non-HTTP response received")
+        }
+        guard (200...299).contains(httpResponse.statusCode) else {
+            if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                throw OpenAIClientError.authenticationFailed("Provider rejected the configured credentials (HTTP \(httpResponse.statusCode)).")
+            }
+            if httpResponse.statusCode == 429 {
+                throw OpenAIClientError.rateLimited("Provider rate limit exceeded.")
+            }
+            // Do not echo the response body: providers may repeat the submitted key.
+            throw OpenAIClientError.serverError(statusCode: httpResponse.statusCode,
+                                                 message: "The provider rejected the request.")
+        }
+
+        guard let responseObject = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = responseObject["choices"] as? [[String: Any]],
+              let message = choices.first?["message"] as? [String: Any] else {
+            throw OpenAIClientError.invalidResponseFormat("Chat completion did not contain a message choice.")
+        }
+        if let rawCalls = message["tool_calls"] as? [[String: Any]], !rawCalls.isEmpty {
+            let calls = try rawCalls.map(decodeToolCall)
+            return .toolCalls(calls)
+        }
+        return .message(message["content"] as? String ?? "")
+    }
+                    
     // MARK: - Delta Parsing
     
     public static func extractDeltaContent(from jsonData: Data) -> String? {
@@ -254,9 +373,23 @@ public actor OpenAIClient: ModelProviderProtocol {
         }
         return content
     }
+
+    private func decodeToolCall(_ entry: [String: Any]) throws -> ProviderToolCall {
+        guard let id = entry["id"] as? String, !id.isEmpty,
+              let function = entry["function"] as? [String: Any],
+              let name = function["name"] as? String, !name.isEmpty,
+              let argumentString = function["arguments"] as? String else {
+            throw OpenAIClientError.invalidResponseFormat("A tool call was missing its id, function name, or arguments.")
+        }
+        let arguments = Data(argumentString.utf8)
+        guard (try? JSONSerialization.jsonObject(with: arguments)) as? [String: Any] != nil else {
+            throw OpenAIClientError.invalidResponseFormat("Tool call arguments were not a JSON object.")
+        }
+        return ProviderToolCall(id: id, name: name, arguments: arguments)
+    }
     
     private func applyHeaders(to request: inout URLRequest) {
-        if let apiKey = keychain.get(key: "api_key_\(config.id.uuidString)") {
+        if let apiKey = credentialLookup("api_key_\(config.id.uuidString)") {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
         if config.authMethod == .chatgptSubscription {

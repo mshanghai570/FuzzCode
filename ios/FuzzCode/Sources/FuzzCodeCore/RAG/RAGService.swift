@@ -69,7 +69,8 @@ public actor RAGService {
     
     /// Performs keyword and term-frequency retrieval across enabled sources.
     public func retrieve(query: String, sources: [RAGSource], config: RAGConfig) -> (augmentedContext: String, citations: [RetrievedCitation]) {
-        guard config.isEnabled, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard config.isEnabled, config.topK > 0, config.maxContextTokens > 0,
+              !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return ("", [])
         }
         
@@ -109,7 +110,16 @@ public actor RAGService {
         }
         
         scored.sort { $0.score > $1.score }
-        let topChunks = scored.prefix(config.topK)
+        // Skip chunks that cannot fit rather than exceeding the configured prompt budget.
+        // Token counts are approximations (four characters per token), not model tokenization.
+        var topChunks: [(chunk: RAGChunk, score: Double)] = []
+        var usedTokens = 0
+        for item in scored {
+            guard topChunks.count < config.topK else { break }
+            guard item.chunk.tokens <= config.maxContextTokens - usedTokens else { continue }
+            topChunks.append(item)
+            usedTokens += item.chunk.tokens
+        }
         
         let citations = topChunks.map { item in
             RetrievedCitation(
@@ -130,13 +140,21 @@ public actor RAGService {
     }
     
     /// Builds full system prompt combining custom directives and retrieved knowledge.
-    public func buildSystemPrompt(basePrompt: String?, ragContext: String) -> String {
+    public func buildSystemPrompt(
+        basePrompt: String?,
+        ragContext: String,
+        skillContents: [(name: String, content: String)] = []
+    ) -> String {
         var parts: [String] = []
         if let base = basePrompt, !base.isEmpty {
             parts.append(base)
         }
         if !ragContext.isEmpty {
             parts.append("## Verified Project Knowledge:\n\(ragContext)")
+        }
+        if !skillContents.isEmpty {
+            let entries = skillContents.map { "[Skill: \($0.name)]\n\($0.content)" }
+            parts.append("<selected_skills>\n\(entries.joined(separator: "\n\n"))\n</selected_skills>")
         }
         return parts.joined(separator: "\n\n")
     }

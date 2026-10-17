@@ -11,6 +11,10 @@ public struct OpenCodeHostConfig: Identifiable, Codable, Equatable, Sendable {
     public var currentWorkspace: String?
     public var capabilities: [AgentCapability]
     public var lastSeen: Date?
+    public var agentKind: AgentConnectionKind?
+    public var remoteProtocol: RemoteAgentProtocol?
+    public var allowsInsecureTransport: Bool?
+    public var username: String?
     
     public init(
         id: UUID = UUID(),
@@ -22,7 +26,11 @@ public struct OpenCodeHostConfig: Identifiable, Codable, Equatable, Sendable {
         agentVersion: String? = nil,
         currentWorkspace: String? = nil,
         capabilities: [AgentCapability] = [.sessions, .streaming, .toolEvents, .cancellation, .fileDiffs, .permissionRequests, .gitStatus],
-        lastSeen: Date? = nil
+        lastSeen: Date? = nil,
+        agentKind: AgentConnectionKind? = nil,
+        remoteProtocol: RemoteAgentProtocol? = nil,
+        allowsInsecureTransport: Bool? = nil,
+        username: String? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -34,6 +42,10 @@ public struct OpenCodeHostConfig: Identifiable, Codable, Equatable, Sendable {
         self.currentWorkspace = currentWorkspace
         self.capabilities = capabilities
         self.lastSeen = lastSeen
+        self.agentKind = agentKind
+        self.remoteProtocol = remoteProtocol
+        self.allowsInsecureTransport = allowsInsecureTransport
+        self.username = username
     }
 }
 
@@ -47,6 +59,8 @@ public struct AgentSession: Identifiable, Codable, Equatable, Sendable {
     public var updatedAt: Date
     public var messages: [AgentSessionMessage]
     public var pendingPermission: PermissionRequest?
+    public var connectionKind: AgentConnectionKind?
+    public var providerId: UUID?
     
     public init(
         id: String = UUID().uuidString,
@@ -57,7 +71,9 @@ public struct AgentSession: Identifiable, Codable, Equatable, Sendable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         messages: [AgentSessionMessage] = [],
-        pendingPermission: PermissionRequest? = nil
+        pendingPermission: PermissionRequest? = nil,
+        connectionKind: AgentConnectionKind? = nil,
+        providerId: UUID? = nil
     ) {
         self.id = id
         self.hostId = hostId
@@ -68,6 +84,8 @@ public struct AgentSession: Identifiable, Codable, Equatable, Sendable {
         self.updatedAt = updatedAt
         self.messages = messages
         self.pendingPermission = pendingPermission
+        self.connectionKind = connectionKind
+        self.providerId = providerId
     }
 }
 

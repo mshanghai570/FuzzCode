@@ -13,12 +13,12 @@ FuzzCode is a native iOS application built with Swift and SwiftUI that turns you
    - Connect to OpenAI, Groq, Kilo, Ollama, LM Studio, vLLM, or self-hosted proxies.
    - Streaming token responses over Server-Sent Events (SSE).
    - Dynamic model discovery via `GET /models`.
-   - Strict URL normalization preventing duplicate `/v1` paths.
+   - URL normalization for standard `/v1` paths.
    - Non-HTTPS allowed only through explicit local development toggles.
 
 2. **Built-in AI Chat**
    - Live token-by-token streaming with cancellation controls.
-   - Markdown formatting with syntax-highlighted code blocks & one-tap copy.
+   - Selectable response text and one-tap copy.
    - Conversation history persistence.
 
 3. **OpenCode Coding Agent Runtime Integration**
@@ -32,7 +32,7 @@ FuzzCode is a native iOS application built with Swift and SwiftUI that turns you
    - Deep charcoal palette (`#0B0C0E`), acid green accents (`#22C55E`), and electric purple highlights (`#8B5CF6`).
    - Stompbox bypass feedback and rotary gain dial haptics (`UIImpactFeedbackGenerator`).
 
-5. **Enterprise Security**
+5. **Credential Storage**
    - All API keys and host pairing tokens are stored exclusively in the native iOS Keychain (`kSecClassGenericPassword`).
    - Credentials are automatically redacted in logs, UI, and exported diagnostics.
 
@@ -72,8 +72,35 @@ FuzzCode/
 - iOS 17.0+ deployment target (optimized for iPhone 15/16 Pro)
 - Swift 5.9+
 
-### Open in Xcode
-1. Open Xcode and select `File > Open...`
-2. Select the `Package.swift` file in this directory.
-3. Select an iOS 17+ Simulator or your connected iPhone.
-4. Press `Cmd + R` to build and run.
+### Open and run the iOS app
+1. Open `FuzzCode.xcodeproj` in this directory.
+2. Select the **FuzzCode** scheme and an iPhone simulator.
+3. Press Cmd + R. For a physical iPhone, choose your signing team under Signing & Capabilities.
+
+The checked-in project contains an application target, a core framework, and unit tests. `Package.swift` remains available for consumers of the core and UI libraries.
+
+To regenerate the Xcode project after adding files or changing targets (requires [XcodeGen](https://github.com/yonaskolb/XcodeGen)):
+
+```sh
+xcodegen generate --spec project.yml
+```
+
+Build and test from this directory:
+
+```sh
+xcodebuild -project FuzzCode.xcodeproj -scheme FuzzCode -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project FuzzCode.xcodeproj -scheme FuzzCodeCoreTests -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+```
+
+### Conversation project context
+In Chat, open **Project context** in the toolbar to edit the system prompt, add pasted documents or code, and tune retrieval. Context is saved per conversation and restored from history. Matching source names appear above the composer after a request. Retrieval is local keyword matching, not embedding-based semantic search; only enabled sources are considered, with a configurable approximate token budget.
+
+### Current integration boundaries
+- Chat requires a working OpenAI-compatible endpoint and API credentials, configured under Providers.
+- The existing OpenCode client expects a custom `/api/v1` companion API; compatibility with a stock OpenCode server still needs validation.
+- MCP and GitHub connector views and services are scaffolding. MCP needs proper initialization, discovery, session handling, authenticated calls, and tool approvals before agent use. They are not yet wired into agent execution.
+- ChatGPT subscription settings are not a working OAuth integration. Use an API key with a compatible provider.
+- Rich Markdown/code rendering, repository editing, app icons, and physical-device accessibility checks remain follow-up work.
+
+### Latest local verification
+The simulator app build passed, and all 28 core tests passed using a temporary core-only macOS package. The installed simulator was not available to Xcode's destination discovery; direct simulator installation timed out. Visual QA, device accessibility checks, and live API/agent integration tests are still pending.
